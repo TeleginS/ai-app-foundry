@@ -1,0 +1,13 @@
+# AI App Foundry — DSH plugin bundle.
+#
+# Inserting this package into a profile mounts the bundled skill provider in
+# dsh/index.mjs, which serves every skill under skills/ in the session catalog.
+# The bundle is enabled when it is installed; disable it from the Plugins page
+# or with an id-targeted patch:
+#
+#   - id: ai-app-foundry
+#     disabled: true
+#
+- insert:
+    - id: ai-app-foundry
+      name: ai-app-foundry

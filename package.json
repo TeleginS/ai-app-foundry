@@ -1,0 +1,49 @@
+{
+  "name": "ai-app-foundry",
+  "version": "0.1.0",
+  "description": "AI-powered development toolkit for iOS apps and backends, with reusable agents, skills, and workflows for planning, coding, review, testing, and releases.",
+  "author": {
+    "name": "TeleginS",
+    "url": "https://github.com/TeleginS"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TeleginS/ai-app-foundry.git"
+  },
+  "homepage": "https://github.com/TeleginS/ai-app-foundry",
+  "type": "module",
+  "main": "./dsh/index.mjs",
+  "exports": {
+    ".": "./dsh/index.mjs",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "dsh/index.mjs",
+    "cordis.patch.yml",
+    "skills",
+    "locale/*.json",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "skills",
+    "ios",
+    "app-store",
+    "release",
+    "xcode"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check dsh/index.mjs",
+    "test": "node --test"
+  }
+}
