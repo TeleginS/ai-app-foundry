@@ -1,0 +1,17 @@
+{
+  "name": "ai-app-foundry",
+  "version": "0.1.0",
+  "description": "AI-powered workflows for iOS and backend development. Includes the TrafficTestApp release skill.",
+  "author": {
+    "name": "TeleginS",
+    "url": "https://github.com/TeleginS"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "AI App Foundry",
+    "shortDescription": "AI workflows for iOS and backend development",
+    "developerName": "TeleginS",
+    "category": "Developer Tools",
+    "websiteURL": "https://github.com/TeleginS/ai-app-foundry"
+  }
+}

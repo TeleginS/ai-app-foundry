@@ -1,0 +1,20 @@
+{
+  "name": "ai-app-foundry",
+  "interface": {
+    "displayName": "AI App Foundry"
+  },
+  "plugins": [
+    {
+      "name": "ai-app-foundry",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
