@@ -24,9 +24,26 @@ The repository includes a portable `plugin.json`, a Codex compatibility manifest
 
 See the official [plugin packaging and installation documentation](https://developers.openai.com/plugins/build/plugins).
 
+## Install in Claude Code
+
+Install the plugin from this repository's marketplace (Claude Code 2.1.275 or later):
+
+```text
+/plugin install ai-app-foundry --marketplace TeleginS/ai-app-foundry
+```
+
+On older versions, add the marketplace first and then install:
+
+```text
+/plugin marketplace add TeleginS/ai-app-foundry
+/plugin install ai-app-foundry@ai-app-foundry
+```
+
+The Claude Code manifests live in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`; they share the same `skills/` directory with Codex. See the [Claude Code plugin documentation](https://code.claude.com/docs/en/plugins).
+
 ## Use
 
-Open the TrafficTestApp checkout and invoke the installed **Publish App Release** skill. For example:
+Open the TrafficTestApp checkout and invoke the installed **Publish App Release** skill. For example, in Codex:
 
 ```text
 Use $publish-app-release to prepare App Store metadata for the current version in RU/EN/ES.
@@ -34,6 +51,12 @@ Use $publish-app-release to prepare App Store metadata for the current version i
 
 ```text
 Use $publish-app-release to create a signed archive of the current version. Archive only.
+```
+
+In Claude Code, invoke it as `/ai-app-foundry:publish-app-release` or describe the task and Claude loads the skill automatically:
+
+```text
+/ai-app-foundry:publish-app-release prepare App Store metadata for the current version in RU/EN/ES
 ```
 
 Only requested stages run. Installing this plugin does not publish a release, upload a build, change App Store metadata, or submit an app for review.
@@ -58,7 +81,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s skills/publish-app-release/tests -v
 ```
 
-Add further skills as `skills/<skill-name>/SKILL.md`, with supporting resources inside that skill's directory. Update the plugin version and both manifests together when publishing package changes.
+Add further skills as `skills/<skill-name>/SKILL.md`, with supporting resources inside that skill's directory. Update the plugin version in all manifests together when publishing package changes: `plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, and `.claude-plugin/marketplace.json`. Validate the Claude Code manifests with:
+
+```bash
+claude plugin validate .
+```
 
 ## Origin
 
