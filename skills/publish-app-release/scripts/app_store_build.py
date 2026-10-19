@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic TrafficTestApp archive/export/upload CLI. Python standard library only."""
+"""Deterministic iOS archive/export/upload CLI. Python standard library only."""
 
 import argparse
 import datetime as dt
@@ -15,12 +15,6 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-
-
-BUNDLE_ID = "com.telegins.RUSAutoescuelaDGT"
-PROJECT = "TrafficTestApp.xcodeproj"
-SCHEME = "TrafficTestApp"
-APP_PATHS = ["TrafficRulesApp", PROJECT, "StoreKit.storekit", ":(glob)*.xcconfig"]
 
 
 class Failure(Exception):
@@ -120,9 +114,11 @@ def source_state(repo):
         return result.stdout
 
     commit = git("rev-parse", "HEAD").decode().strip()
-    changes = git("status", "--porcelain=v1", "--untracked-files=all", "--", *APP_PATHS)
-    h = hashlib.sha256(git("diff", "HEAD", "--binary", "--", *APP_PATHS))
-    for name in git("ls-files", "--others", "--exclude-standard", "-z", "--", *APP_PATHS).split(b"\0"):
+    require(Path(git("rev-parse", "--show-toplevel").decode().strip()).resolve() == repo.resolve(),
+            "--repo must name the Git repository root", 2)
+    changes = git("status", "--porcelain=v1", "--untracked-files=all")
+    h = hashlib.sha256(git("diff", "HEAD", "--binary"))
+    for name in git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0"):
         if name:
             path = safe_child(repo, os.fsdecode(name))
             h.update(name)
@@ -138,36 +134,75 @@ def identity_from_settings(settings):
     result = {key: settings.get(value, "") for key, value in keys.items()}
     require(re.fullmatch(r"\d+\.\d+\.\d+", result["version"]), "Invalid app marketing version", 2)
     require(result["build"], "Missing app build number", 2)
-    require(result["bundle_id"] == BUNDLE_ID, "Unexpected app bundle identifier", 2)
+    require(result["bundle_id"] and "$" not in result["bundle_id"], "Missing or unresolved app bundle identifier", 2)
     require(result["team"], "Missing signing team", 2)
     require(result["signing_style"] in {"Automatic", "Manual"}, "Unknown signing style", 2)
     return result
 
 
 def check_expected(identity, args):
-    for key in ["version", "build", "team"]:
+    for key in ["version", "build", "team", "bundle_id"]:
         expected = getattr(args, key, None)
         require(not expected or identity[key] == expected, f"Requested {key} does not match artifact/settings", 2)
 
 
+def select_container(args):
+    repo = args.repo.expanduser().resolve()
+    require(repo.is_dir(), "Application repository not found", 2)
+    if args.project or args.workspace:
+        kind = "workspace" if args.workspace else "project"
+        path = (repo / (args.workspace or args.project)).resolve()
+    else:
+        candidates = sorted([*repo.glob("*.xcodeproj"), *repo.glob("*.xcworkspace")])
+        require(len(candidates) == 1,
+                "Specify --project or --workspace: expected exactly one top-level Xcode container", 2)
+        path = candidates[0].resolve()
+        kind = "workspace" if path.suffix == ".xcworkspace" else "project"
+    suffix = ".xcworkspace" if kind == "workspace" else ".xcodeproj"
+    require(path.is_dir() and path.suffix == suffix and path.is_relative_to(repo),
+            "Xcode container must exist inside --repo and have the correct extension", 2)
+    return {"kind": kind, "path": str(path.relative_to(repo))}
+
+
+def container_flags(selection):
+    return [f"-{selection['kind']}", selection["path"]]
+
+
 def inspect_project(args, runner):
-    repo = args.repo.resolve()
-    require((repo / PROJECT).is_dir(), "TrafficTestApp project not found", 2)
+    repo = args.repo.expanduser().resolve()
+    selection = select_container(args)
     developer_dir = runner.run(["xcode-select", "-p"], label="developer-dir")[0].decode().strip()
     xcode = runner.run(["xcodebuild", "-version"], label="xcode-version")[0].decode().strip()
+    scheme = args.scheme
+    if not scheme:
+        output, _ = runner.run(["xcodebuild", *container_flags(selection), "-list", "-json"],
+                               cwd=repo, label="schemes")
+        schemes = json.loads(output).get(selection["kind"], {}).get("schemes", [])
+        require(len(schemes) == 1, "Specify --scheme: expected exactly one Xcode scheme", 2)
+        scheme = schemes[0]
+    selection.update(scheme=scheme, configuration=args.configuration,
+                     validation_configuration=args.validation_configuration)
     identities = []
-    for configuration in ["Debug", "Release"]:
+    for configuration in [args.validation_configuration, args.configuration]:
         output, _ = runner.run([
-            "xcodebuild", "-project", PROJECT, "-scheme", SCHEME,
+            "xcodebuild", *container_flags(selection), "-scheme", scheme,
             "-configuration", configuration, "-destination", "generic/platform=iOS",
             "-showBuildSettings", "-json", "-disableAutomaticPackageResolution",
         ], cwd=repo, label=f"settings-{configuration.lower()}", record_stdout=False)
-        targets = [item for item in json.loads(output) if item.get("target") == SCHEME]
-        require(len(targets) == 1, "Expected exactly one app target", 2)
+        targets = [item for item in json.loads(output)
+                   if item.get("buildSettings", {}).get("PRODUCT_TYPE") == "com.apple.product-type.application"]
+        if args.target:
+            targets = [item for item in targets if item.get("target") == args.target]
+        require(len(targets) == 1, "Specify --target: expected exactly one application target in the scheme", 2)
+        target = targets[0]["target"]
+        require("target" not in selection or selection["target"] == target,
+                "Application target differs between configurations", 2)
+        selection["target"] = target
         identities.append(identity_from_settings(targets[0]["buildSettings"]))
-    require(identities[0] == identities[1], "Debug/Release app identity or signing settings differ", 2)
+    require(identities[0] == identities[1], "App identity or signing settings differ between configurations", 2)
     check_expected(identities[1], args)
     return {"identity": identities[1], "source": source_state(repo),
+            "selection": selection,
             "toolchain": {"developer_dir": developer_dir, "xcode": xcode}}
 
 
@@ -217,7 +252,12 @@ def verify_app(app, runner, expected=None, distribution=False):
     info = read_plist(app / "Info.plist")
     identity = {"version": info.get("CFBundleShortVersionString"),
                 "build": info.get("CFBundleVersion"), "bundle_id": info.get("CFBundleIdentifier")}
-    require(identity["bundle_id"] == BUNDLE_ID, "Unexpected artifact bundle identifier")
+    require(identity["bundle_id"], "Artifact bundle identifier is missing")
+    if expected:
+        # Reject the wrong app before invoking signing/export tools.
+        for key, value in expected.items():
+            if key in identity and value is not None:
+                require(identity[key] == value, f"Artifact {key} mismatch")
     require(identity["version"] and identity["build"], "Artifact version/build is missing")
     require(info.get("DTPlatformName") == "iphoneos", "Artifact is not an iOS device app")
     binary = safe_child(app, info.get("CFBundleExecutable"))
@@ -238,7 +278,8 @@ def verify_app(app, runner, expected=None, distribution=False):
                                identity["bundle_id"], identity["team"], distribution)
     if expected:
         for key in ["version", "build", "bundle_id", "team"]:
-            require(identity[key] == expected[key], f"Artifact {key} mismatch")
+            if expected.get(key) is not None:
+                require(identity[key] == expected[key], f"Artifact {key} mismatch")
     return {"identity": identity, "architectures": arches, "profile": profile}, binary
 
 
@@ -302,7 +343,7 @@ def extract_ipa(ipa, target):
 
 
 def verify_ipa(ipa, runner, expected=None):
-    with tempfile.TemporaryDirectory(prefix="traffic-ipa-inspect-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="app-ipa-inspect-") as temporary:
         app = extract_ipa(ipa, Path(temporary))
         report, _ = verify_app(app, runner, expected, distribution=True)
     report.update(ipa_path=str(ipa.resolve()), sha256=digest(ipa))
@@ -361,8 +402,10 @@ def archive_command(args, runner):
     inspected = inspect_project(args, runner)
     require(not inspected["source"]["app_changes"] or args.include_dirty_source,
             "App source has local changes; inspect and explicitly include them", 2)
-    archive = runner.work / "TrafficTestApp.xcarchive"
-    command = ["xcodebuild", "-project", PROJECT, "-scheme", SCHEME, "-configuration", "Release",
+    archive = runner.work / "App.xcarchive"
+    selection = inspected["selection"]
+    command = ["xcodebuild", *container_flags(selection), "-scheme", selection["scheme"],
+               "-configuration", selection["configuration"],
                "-destination", "generic/platform=iOS", "-archivePath", str(archive),
                "-resultBundlePath", str(runner.work / "archive.xcresult"),
                *authentication(args), "archive"]
@@ -376,7 +419,7 @@ def archive_command(args, runner):
 
 def distribute(args, runner):
     archive = outside_repo(args.archive, args.repo)
-    report = verify_archive(archive, runner)
+    report = verify_archive(archive, runner, {"bundle_id": args.bundle_id})
     check_expected(report["identity"], args)
     help_stdout, help_stderr = runner.run(["xcodebuild", "-help"], label="export-help")
     options = export_options(args, report["identity"], (help_stdout + help_stderr).decode())
@@ -440,6 +483,16 @@ def parser():
         command.add_argument("--version")
         command.add_argument("--build")
         command.add_argument("--team")
+        command.add_argument("--bundle-id", required=name != "inspect",
+                             help="Expected application bundle identifier (an assertion, never an override)")
+        if name in {"inspect", "archive"}:
+            container = command.add_mutually_exclusive_group()
+            container.add_argument("--project", type=Path)
+            container.add_argument("--workspace", type=Path)
+            command.add_argument("--scheme")
+            command.add_argument("--target", help="Application target when a scheme contains several apps")
+            command.add_argument("--configuration", default="Release")
+            command.add_argument("--validation-configuration", default="Debug")
         command.add_argument("--output-dir", type=Path, required=name in {"archive", "export", "upload"})
         if name in {"archive", "export", "upload"}:
             command.add_argument("--allow-provisioning-updates", action="store_true")
@@ -466,6 +519,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     work = None
     try:
+        args.repo = args.repo.expanduser().resolve()
         # Refuse an unconfirmed upload before even creating output directories.
         if args.command == "upload":
             require(args.confirm_upload, "Upload requires --confirm-upload and explicit user authorization", 2)
@@ -477,10 +531,10 @@ def main(argv=None):
         elif args.command == "archive":
             result = archive_command(args, runner)
         elif args.command == "verify-archive":
-            result = {"status": "verified", **verify_archive(args.archive, runner)}
+            result = {"status": "verified", **verify_archive(args.archive, runner, {"bundle_id": args.bundle_id})}
             check_expected(result["identity"], args)
         elif args.command == "verify-ipa":
-            result = {"status": "verified", **verify_ipa(args.ipa, runner)}
+            result = {"status": "verified", **verify_ipa(args.ipa, runner, {"bundle_id": args.bundle_id})}
             check_expected(result["identity"], args)
         else:
             result = distribute(args, runner)

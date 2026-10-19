@@ -2,14 +2,14 @@
 
 AI-powered development toolkit for iOS apps and backends, with reusable agents, skills, and workflows for planning, coding, review, testing, and releases.
 
-## Included in 0.1.0
+## Included in 0.2.0
 
-- **[publish-app-release](skills/publish-app-release/SKILL.md)**: prepare App Store Description and What's New in Russian, English, and Spanish; manage authorized versioning and GitHub release stages; create and verify signed archives; export IPAs; upload to App Store Connect.
+- **[publish-app-release](skills/publish-app-release/SKILL.md)**: prepare App Store Description and What's New in the app's requested locales; manage authorized versioning and GitHub release stages; create and verify signed archives; export IPAs; upload to App Store Connect.
 - A standard-library Python CLI with signing, identity, provenance, dSYM, and duplicate-upload checks.
 - Offline tests that use fake external tools and never build, sign, or upload a real app.
 - Client packaging for Codex, Claude Code, and DeepSeek Harness: the DSH plugin bundle in `package.json`, `cordis.patch.yml`, and [`dsh/index.mjs`](dsh/index.mjs) serves the same `skills/` directory in DSH sessions.
 
-The initial release skill is specific to [TrafficTestApp](https://github.com/TeleginS/TrafficRulesApp): project `TrafficTestApp.xcodeproj`, scheme `TrafficTestApp`, bundle `com.telegins.RUSAutoescuelaDGT`, and RU/EN/ES metadata. It is not yet a general-purpose release tool for arbitrary apps. Backend skills are planned; none are included in this version.
+The release skill supports iOS app repositories with `.xcodeproj` or `.xcworkspace` containers, explicit or unambiguous scheme selection, independent scheme/target names, and custom build configurations. It reads application identity and release conventions from the selected checkout. Backend skills are planned; none are included in this version.
 
 ## Install in Codex
 
@@ -62,10 +62,10 @@ DSH also discovers local skills without a bundle: link the skill directory into 
 
 ## Use
 
-Open the TrafficTestApp checkout and invoke the installed **Publish App Release** skill. For example, in Codex:
+Open the application checkout and invoke the installed **Publish App Release** skill. For example, in Codex:
 
 ```text
-Use $publish-app-release to prepare App Store metadata for the current version in RU/EN/ES.
+Use $publish-app-release to prepare App Store metadata for the current version in English and Spanish.
 ```
 
 ```text
@@ -75,13 +75,13 @@ Use $publish-app-release to create a signed archive of the current version. Arch
 In Claude Code, invoke it as `/ai-app-foundry:publish-app-release` or describe the task and Claude loads the skill automatically:
 
 ```text
-/ai-app-foundry:publish-app-release prepare App Store metadata for the current version in RU/EN/ES
+/ai-app-foundry:publish-app-release prepare App Store metadata for the current version in English and Spanish
 ```
 
 In DSH, describe the task and the agent loads the skill from its catalog, or invoke it explicitly by name:
 
 ```text
-/publish-app-release prepare App Store metadata for the current version in RU/EN/ES
+/publish-app-release prepare App Store metadata for the current version in English and Spanish
 ```
 
 Only requested stages run. Installing this plugin does not publish a release, upload a build, change App Store metadata, or submit an app for review.
@@ -90,8 +90,18 @@ For direct CLI use, resolve `SKILL_DIR` to the installed `skills/publish-app-rel
 
 ```bash
 python3 "$SKILL_DIR/scripts/app_store_build.py" inspect \
-  --repo /absolute/path/to/TrafficRulesApp
+  --repo /absolute/path/to/application-repo
 ```
+
+For a workspace or an ambiguous checkout, pass its selection explicitly:
+
+```bash
+python3 "$SKILL_DIR/scripts/app_store_build.py" inspect \
+  --repo /absolute/path/to/application-repo \
+  --workspace 'Client Workspace.xcworkspace' --scheme 'Store Scheme'
+```
+
+Use the resolved bundle ID as `--bundle-id com.example.app` for `archive`, `verify-archive`, `export`, `verify-ipa`, and `upload`. These commands reject a different app identity; they never rewrite it. `--target` selects among multiple native app targets; `--configuration` and `--validation-configuration` support custom configuration names. Source provenance covers the entire Git checkout so shared code and configuration changes are included. See the [CLI contract and examples](skills/publish-app-release/references/app-store-build.md).
 
 The CLI defaults to the current working directory when `--repo` is omitted. It never derives the app repository from the plugin cache path. Use absolute paths for installed scripts; do not assume they exist inside the application checkout.
 
@@ -120,4 +130,4 @@ claude plugin validate .
 
 ## Origin
 
-The release skill was imported from [TrafficRulesApp at e873cd6](https://github.com/TeleginS/TrafficRulesApp/tree/e873cd640058a75d29b8d9ab37fdfcf4b6787d7b/.agents/skills/publish-app-release), including its bullet-formatting rules, references, CLI, and offline tests. The packaged copy adjusts resource paths and repository selection for installation outside the app checkout. The original repository skill remains in place.
+The release skill was imported from [TrafficRulesApp at e873cd6](https://github.com/TeleginS/TrafficRulesApp/tree/e873cd640058a75d29b8d9ab37fdfcf4b6787d7b/.agents/skills/publish-app-release), including its bullet-formatting rules, references, CLI, and offline tests. Version 0.2.0 generalizes app identity, project/workspace selection, source provenance, metadata locales, and release conventions for reuse across iOS apps. The original repository skill remains in place.

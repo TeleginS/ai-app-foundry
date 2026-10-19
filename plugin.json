@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ai-app-foundry",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AI-powered development toolkit for iOS apps and backends, with reusable agents, skills, and workflows for planning, coding, review, testing, and releases.",
   "author": {
     "name": "TeleginS",
@@ -14,7 +14,7 @@
       "interface": {
         "displayName": "AI App Foundry",
         "shortDescription": "AI workflows for iOS and backend development",
-        "longDescription": "A growing development toolkit. Version 0.1.0 includes the TrafficTestApp release skill for store metadata, GitHub releases, signed archives, IPA export, and App Store Connect uploads.",
+        "longDescription": "A growing development toolkit. Version 0.2.0 includes a reusable iOS app release skill for store metadata, GitHub releases, signed archives, IPA export, and App Store Connect uploads.",
         "developerName": "TeleginS",
         "category": "Developer Tools",
         "websiteURL": "https://github.com/TeleginS/ai-app-foundry"

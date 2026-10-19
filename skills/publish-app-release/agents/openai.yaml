@@ -1,4 +1,4 @@
 interface:
   display_name: "Publish App Release"
   short_description: "Prepare store copy or release, archive, and upload the app"
-  default_prompt: "Use $publish-app-release for the requested TrafficTestApp version and stages, including metadata-only Description and What's New in RU/EN/ES, GitHub publication, signed archives, or App Store Connect upload."
+  default_prompt: "Use $publish-app-release for the selected iOS app's requested version, locales, and stages, including metadata-only Description and What's New, GitHub publication, signed archives, or App Store Connect upload."

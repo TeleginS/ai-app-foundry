@@ -88,5 +88,5 @@ test('loads the instruction body without frontmatter and keeps the summary', asy
   const expectedBody = raw.replace(FRONTMATTER, '').trim()
   assert.equal(loaded.content, expectedBody)
   assert.ok(!loaded.content.startsWith('---'))
-  assert.ok(loaded.content.startsWith('# Publish TrafficTestApp Release'))
+  assert.ok(loaded.content.startsWith('# Publish iOS App Release'))
 })

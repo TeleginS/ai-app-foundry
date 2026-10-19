@@ -11,6 +11,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,15 +24,19 @@ spec = importlib.util.spec_from_file_location("app_store_build", SCRIPT)
 cli = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cli)
 REAL_RUNNER = cli.Runner
+PROJECT = "Client.xcodeproj"
+SCHEME = "Shipping"
+TARGET = "ClientApp"
+BUNDLE_ID = "org.example.client"
 TEAM = "TESTTEAM01"
 UUID = "00112233-4455-6677-8899-AABBCCDDEEFF"
 SOURCE = {"commit": "test-commit", "app_changes": [], "app_diff_sha256": "test-diff"}
 
 
-def profile(distribution=False):
+def profile(distribution=False, bundle_id=BUNDLE_ID):
     value = {"ExpirationDate": dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(days=1),
              "TeamIdentifier": [TEAM], "ApplicationIdentifierPrefix": ["PREFIX"],
-             "Entitlements": {"application-identifier": f"PREFIX.{cli.BUNDLE_ID}",
+             "Entitlements": {"application-identifier": f"PREFIX.{bundle_id}",
                               "com.apple.developer.team-identifier": TEAM,
                               "get-task-allow": not distribution}}
     if not distribution:
@@ -44,20 +49,20 @@ def write_plist(path, value):
     path.write_bytes(plistlib.dumps(value))
 
 
-def make_archive(path):
-    app = path / "Products/Applications/TrafficTestApp.app"
-    write_plist(app / "Info.plist", {"CFBundleIdentifier": cli.BUNDLE_ID,
+def make_archive(path, bundle_id=BUNDLE_ID):
+    app = path / "Products/Applications/ClientApp.app"
+    write_plist(app / "Info.plist", {"CFBundleIdentifier": bundle_id,
                                    "CFBundleShortVersionString": "2.0.3", "CFBundleVersion": "1",
-                                   "CFBundleExecutable": "TrafficTestApp", "DTPlatformName": "iphoneos"})
-    (app / "TrafficTestApp").write_bytes(b"mock Mach-O")
-    (app / "TrafficTestApp").chmod(0o755)
-    write_plist(app / "embedded.mobileprovision", profile())
+                                   "CFBundleExecutable": "ClientApp", "DTPlatformName": "iphoneos"})
+    (app / "ClientApp").write_bytes(b"mock Mach-O")
+    (app / "ClientApp").chmod(0o755)
+    write_plist(app / "embedded.mobileprovision", profile(bundle_id=bundle_id))
     (app / "_CodeSignature").mkdir()
     (app / "_CodeSignature/CodeResources").write_bytes(b"mock resource seal")
     write_plist(path / "Info.plist", {"ApplicationProperties": {
-        "ApplicationPath": "Applications/TrafficTestApp.app", "CFBundleIdentifier": cli.BUNDLE_ID,
+        "ApplicationPath": "Applications/ClientApp.app", "CFBundleIdentifier": bundle_id,
         "CFBundleShortVersionString": "2.0.3", "CFBundleVersion": "1"}})
-    dwarf = path / "dSYMs/TrafficTestApp.app.dSYM/Contents/Resources/DWARF/TrafficTestApp"
+    dwarf = path / "dSYMs/ClientApp.app.dSYM/Contents/Resources/DWARF/ClientApp"
     dwarf.parent.mkdir(parents=True)
     dwarf.write_bytes(b"mock DWARF")
     return app
@@ -68,6 +73,10 @@ class FakeRunner:
     fail_label = None
     wrong_dsym = False
     export_development_profile = False
+    bundle_id = BUNDLE_ID
+    schemes = [SCHEME]
+    app_targets = [TARGET]
+    settings_overrides = {}
 
     def __init__(self, work=None):
         self.work = work
@@ -80,17 +89,22 @@ class FakeRunner:
             return b"/Applications/Xcode.app/Contents/Developer\n", b""
         if args[:2] == ["xcodebuild", "-version"]:
             return b"Xcode test\nBuild version test\n", b""
+        if "-list" in args:
+            kind = "workspace" if "-workspace" in args else "project"
+            return json.dumps({kind: {"schemes": self.schemes}}).encode(), b""
         if "-showBuildSettings" in args:
-            data = [{"target": "TrafficTestAppTests", "buildSettings": {"MARKETING_VERSION": "9.9.9"}},
-                    {"target": cli.SCHEME, "buildSettings": {
-                        "MARKETING_VERSION": "2.0.3", "CURRENT_PROJECT_VERSION": "1",
-                        "PRODUCT_BUNDLE_IDENTIFIER": cli.BUNDLE_ID, "DEVELOPMENT_TEAM": TEAM,
-                        "CODE_SIGN_STYLE": "Automatic"}}]
+            data = [{"target": "ClientAppTests", "buildSettings": {"MARKETING_VERSION": "9.9.9"}}]
+            for target in self.app_targets:
+                data.append({"target": target, "buildSettings": {
+                    "PRODUCT_TYPE": "com.apple.product-type.application",
+                    "MARKETING_VERSION": "2.0.3", "CURRENT_PROJECT_VERSION": "1",
+                    "PRODUCT_BUNDLE_IDENTIFIER": self.bundle_id, "DEVELOPMENT_TEAM": TEAM,
+                    "CODE_SIGN_STYLE": "Automatic", **self.settings_overrides}})
             return json.dumps(data).encode(), b""
         if args[:2] == ["xcodebuild", "-help"]:
             return b"", b"method: app-store-connect; manageAppVersionAndBuildNumber"
         if args[0] == "xcodebuild" and "archive" in args:
-            make_archive(Path(args[args.index("-archivePath") + 1]))
+            make_archive(Path(args[args.index("-archivePath") + 1]), bundle_id=self.bundle_id)
             return b"", b""
         if args[:2] == ["xcodebuild", "-exportArchive"]:
             options = cli.read_plist(Path(args[args.index("-exportOptionsPlist") + 1]))
@@ -99,11 +113,11 @@ class FakeRunner:
                 destination = Path(args[args.index("-exportPath") + 1])
                 destination.mkdir()
                 with tempfile.TemporaryDirectory() as temporary:
-                    payload = Path(temporary) / "Payload/TrafficTestApp.app"
-                    shutil.copytree(archive / "Products/Applications/TrafficTestApp.app", payload)
+                    payload = Path(temporary) / "Payload/ClientApp.app"
+                    shutil.copytree(archive / "Products/Applications/ClientApp.app", payload)
                     write_plist(payload / "embedded.mobileprovision",
-                                profile(distribution=not self.export_development_profile))
-                    with zipfile.ZipFile(destination / "TrafficTestApp.ipa", "w") as zipped:
+                                profile(distribution=not self.export_development_profile, bundle_id=self.bundle_id))
+                    with zipfile.ZipFile(destination / "ClientApp.ipa", "w") as zipped:
                         for file in payload.rglob("*"):
                             if file.is_file():
                                 zipped.write(file, file.relative_to(temporary))
@@ -129,8 +143,8 @@ class BuildTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.repo = self.root / "repo"
-        (self.repo / cli.PROJECT).mkdir(parents=True)
-        self.archive = self.root / "input/TrafficTestApp.xcarchive"
+        (self.repo / PROJECT).mkdir(parents=True)
+        self.archive = self.root / "input/ClientApp.xcarchive"
         make_archive(self.archive)
         self.runner_patch = patch.object(cli, "Runner", FakeRunner)
         self.source_patch = patch.object(cli, "source_state", return_value=copy.deepcopy(SOURCE))
@@ -140,6 +154,10 @@ class BuildTests(unittest.TestCase):
         FakeRunner.fail_label = None
         FakeRunner.wrong_dsym = False
         FakeRunner.export_development_profile = False
+        FakeRunner.bundle_id = BUNDLE_ID
+        FakeRunner.schemes = [SCHEME]
+        FakeRunner.app_targets = [TARGET]
+        FakeRunner.settings_overrides = {}
 
     def tearDown(self):
         self.source_patch.stop()
@@ -149,7 +167,7 @@ class BuildTests(unittest.TestCase):
     def invoke(self, command, *args):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            code = cli.main([command, "--repo", str(self.repo), *map(str, args)])
+            code = cli.main([command, "--repo", str(self.repo), "--bundle-id", BUNDLE_ID, *map(str, args)])
         result = json.loads(output.getvalue())
         self.assertEqual(code, result["exit_code"])
         return code, result
@@ -172,6 +190,87 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report["status"], "inspected")
         cli.source_state.assert_called_once_with(self.repo.resolve())
+
+    def test_project_scheme_and_application_target_can_have_different_names(self):
+        code, report = self.invoke("inspect")
+        self.assertEqual(code, 0)
+        self.assertEqual(report["selection"], {
+            "kind": "project", "path": PROJECT, "scheme": SCHEME, "target": TARGET,
+            "configuration": "Release", "validation_configuration": "Debug"})
+
+    def test_workspace_and_custom_configurations_are_used_for_archive(self):
+        workspace = self.repo / "Nested/Client Workspace.xcworkspace"
+        workspace.mkdir(parents=True)
+        code, report = self.invoke("archive", "--workspace", workspace.relative_to(self.repo),
+                                   "--scheme", "Production Scheme", "--configuration", "AppStore",
+                                   "--validation-configuration", "Development",
+                                   "--output-dir", self.root / "workspace-archive")
+        self.assertEqual(code, 0)
+        self.assertEqual(report["provenance"]["selection"]["scheme"], "Production Scheme")
+        command = next(args for args, label in FakeRunner.calls if label == "archive")
+        self.assertEqual(command[command.index("-workspace") + 1], "Nested/Client Workspace.xcworkspace")
+        self.assertEqual(command[command.index("-configuration") + 1], "AppStore")
+        self.assertNotIn("-project", command)
+
+    def test_multiple_containers_require_explicit_selection(self):
+        (self.repo / "Other.xcodeproj").mkdir()
+        code, result = self.invoke("inspect")
+        self.assertEqual(code, 2)
+        self.assertIn("--project or --workspace", result["error"])
+        self.assertFalse(FakeRunner.calls)
+        code, _ = self.invoke("inspect", "--project", PROJECT)
+        self.assertEqual(code, 0)
+
+    def test_multiple_schemes_require_explicit_selection(self):
+        FakeRunner.schemes = ["Development", "Store"]
+        code, result = self.invoke("inspect")
+        self.assertEqual(code, 2)
+        self.assertIn("--scheme", result["error"])
+        code, _ = self.invoke("inspect", "--scheme", "Store")
+        self.assertEqual(code, 0)
+
+    def test_multiple_apps_require_explicit_target(self):
+        FakeRunner.app_targets = [TARGET, "Companion"]
+        code, result = self.invoke("inspect")
+        self.assertEqual(code, 2)
+        self.assertIn("--target", result["error"])
+        code, report = self.invoke("inspect", "--target", "Companion")
+        self.assertEqual(code, 0)
+        self.assertEqual(report["selection"]["target"], "Companion")
+
+    def test_bundle_id_is_inferred_by_inspect_and_asserted_before_archive(self):
+        FakeRunner.bundle_id = "net.othercompany.differentapp"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = cli.main(["inspect", "--repo", str(self.repo)])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())["identity"]["bundle_id"], FakeRunner.bundle_id)
+        code, _ = self.invoke("archive", "--output-dir", self.root / "wrong-bundle")
+        self.assertEqual(code, 2)
+        self.assertNotIn("archive", [label for _, label in FakeRunner.calls])
+        code, report = self.invoke("archive", "--bundle-id", FakeRunner.bundle_id,
+                                   "--output-dir", self.root / "different-app")
+        self.assertEqual(code, 0)
+        self.assertEqual(report["identity"]["bundle_id"], FakeRunner.bundle_id)
+
+    def test_wrong_artifact_bundle_is_rejected_before_export_or_upload(self):
+        for command in ["verify-archive", "export", "upload"]:
+            args = ["--archive", self.archive, "--bundle-id", "net.othercompany.wrong"]
+            if command != "verify-archive":
+                args.extend(["--output-dir", self.root / command, "--signing-style", "automatic"])
+            if command == "upload":
+                args.extend(["--confirm-upload", "--app-id", "12345", "--remote-build-check", "available"])
+            code, _ = self.invoke(command, *args)
+            self.assertEqual(code, 4)
+        self.assertFalse(FakeRunner.calls)
+        self.assertFalse(list(self.archive.parent.glob("*.upload-state.json")))
+
+    def test_missing_bundle_assertion_is_rejected_before_disk_or_tools(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+            cli.main(["archive", "--repo", str(self.repo), "--output-dir", str(self.root / "missing-id")])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertFalse((self.root / "missing-id").exists())
+        self.assertFalse(FakeRunner.calls)
 
     def test_archive_selects_app_target_and_preserves_identity_and_source(self):
         code, report = self.invoke("archive", "--output-dir", self.root / "archive-run", "--version", "2.0.3")
@@ -204,7 +303,7 @@ class BuildTests(unittest.TestCase):
         self.assertFalse(FakeRunner.calls)
 
     def test_dirty_source_is_not_silently_included(self):
-        dirty = {**SOURCE, "app_changes": [" M TrafficRulesApp/Example.swift"]}
+        dirty = {**SOURCE, "app_changes": [" M Sources/Example.swift"]}
         with patch.object(cli, "source_state", return_value=dirty):
             code, _ = self.invoke("archive", "--output-dir", self.root / "dirty")
             self.assertEqual(code, 2)
@@ -303,10 +402,10 @@ class BuildTests(unittest.TestCase):
         bad = copy.deepcopy(original)
         bad["ExpirationDate"] = dt.datetime(2000, 1, 1)
         with self.assertRaises(cli.Failure):
-            cli.validate_profile(bad, entitlements, cli.BUNDLE_ID, TEAM)
+            cli.validate_profile(bad, entitlements, BUNDLE_ID, TEAM)
         elevated = {**entitlements, "aps-environment": "production"}
         with self.assertRaises(cli.Failure):
-            cli.validate_profile(original, elevated, cli.BUNDLE_ID, TEAM)
+            cli.validate_profile(original, elevated, BUNDLE_ID, TEAM)
 
     def test_ipa_zip_traversal_and_symlinks_are_rejected(self):
         for name, symlink in [("../escape", False), ("Payload/app.app/link", True)]:
@@ -339,6 +438,37 @@ class BuildTests(unittest.TestCase):
         log = Path(captured.exception.details["log_path"])
         self.assertIn("private-output", log.read_text())
         self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+
+
+class SourceStateTests(unittest.TestCase):
+    def test_changes_outside_conventional_app_directory_are_recorded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            def git(*args):
+                subprocess.run(["git", "-C", str(repo), *args], check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            git("init")
+            (repo / "SharedLibrary").mkdir()
+            source = repo / "SharedLibrary/Logic.swift"
+            source.write_text("initial")
+            git("add", ".")
+            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "Fixture")
+            clean = cli.source_state(repo)
+            self.assertEqual(clean["app_changes"], [])
+            source.write_text("staged change")
+            git("add", ".")
+            staged = cli.source_state(repo)
+            self.assertIn("SharedLibrary/Logic.swift", " ".join(staged["app_changes"]))
+            self.assertNotEqual(clean["app_diff_sha256"], staged["app_diff_sha256"])
+            untracked = repo / "BuildConfig.json"
+            untracked.write_text("new configuration")
+            first = cli.source_state(repo)
+            untracked.write_text("changed configuration")
+            second = cli.source_state(repo)
+            self.assertIn("BuildConfig.json", " ".join(second["app_changes"]))
+            self.assertNotEqual(first["app_diff_sha256"], second["app_diff_sha256"])
+            with self.assertRaises(cli.Failure):
+                cli.source_state(repo / "SharedLibrary")
 
 
 if __name__ == "__main__":

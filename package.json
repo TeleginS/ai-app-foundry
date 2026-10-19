@@ -1,6 +1,6 @@
 {
   "name": "ai-app-foundry",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AI-powered development toolkit for iOS apps and backends, with reusable agents, skills, and workflows for planning, coding, review, testing, and releases.",
   "author": {
     "name": "TeleginS",

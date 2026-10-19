@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "AI App Foundry",
-    "description": "Bundled iOS and backend release skills for DeepSeek Harness, starting with Publish App Release."
+    "description": "AI development workflows for DeepSeek Harness, including a reusable iOS app release skill."
   }
 }
