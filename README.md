@@ -122,11 +122,60 @@ The DSH plugin has its own offline tests; they mount the plugin with a fake skil
 node --test
 ```
 
-Add further skills as `skills/<skill-name>/SKILL.md`, with supporting resources inside that skill's directory. The DSH provider discovers them automatically; no bundle edit is needed. Update the plugin version in all manifests together when publishing package changes: `plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, and the DSH bundle's root `package.json`. Validate the Claude Code manifests with:
+The version script has offline tests that edit temporary copies of the manifests:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+```
+
+Validate the Claude Code manifests with:
 
 ```bash
 claude plugin validate .
 ```
+
+Add further skills as `skills/<skill-name>/SKILL.md`, with supporting resources inside that skill's directory. Codex, Claude Code, and the DSH provider discover them automatically; no manifest edit is needed beyond the version bump.
+
+## Release a new version
+
+Every release that changes the plugin needs a new version. Claude Code caches installed plugins by version, so changes pushed under an unchanged version never reach existing installations. This repository is both the marketplace and the plugin (`"source": "./"`), so one push updates both.
+
+1. Make the change and run all checks from [Develop and validate](#develop-and-validate). To try it in an application checkout before publishing, start Claude Code there with the local plugin directory; disable an installed copy of the plugin for that session so the two do not mix:
+
+   ```bash
+   claude --plugin-dir /absolute/path/to/ai-app-foundry
+   ```
+
+2. Bump the version everywhere at once:
+
+   ```bash
+   python3 scripts/plugin_version.py bump 0.3.0
+   ```
+
+   The script updates the `version` in `plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, the `ai-app-foundry` entry of `.claude-plugin/marketplace.json`, and `package.json`, plus the version in the `longDescription` of `plugin.json` and the **Included in** heading above. It requires a semantic version greater than the current one and refuses to run while the locations disagree. Update the wording of **Included in** and `longDescription` by hand when the contents change. `python3 scripts/plugin_version.py check` verifies that all locations agree.
+
+3. Commit and push to `master`.
+
+4. Tag the release commit and publish a GitHub Release, following the existing `v0.1.0` convention:
+
+   ```bash
+   git tag -a v0.3.0 -m "Version 0.3.0"
+   git push origin v0.3.0
+   gh release create v0.3.0 --title "Release v0.3.0" --notes "..."
+   ```
+
+## Update an installed plugin
+
+Claude Code: refresh the marketplace, update the plugin, then restart Claude Code. The same actions are available in `/plugin`.
+
+```bash
+claude plugin marketplace update ai-app-foundry
+claude plugin update ai-app-foundry@ai-app-foundry
+```
+
+Codex: refresh the marketplace snapshot with `codex plugin marketplace upgrade`. If the new version does not appear, reinstall the plugin with `codex plugin remove` and `codex plugin add`.
+
+DSH: reinstall the bundle with `dsh plugin --profile web remove ai-app-foundry` followed by `dsh plugin --profile web add github:TeleginS/ai-app-foundry`.
 
 ## Origin
 
